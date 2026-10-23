@@ -153,30 +153,25 @@
       return '';
     }
 
-    function connectToGoogle() {
-      if (bridgeReady) return true;
+    
+function connectToGoogle() {
+  if (bridgeReady) return true;
 
-      if (!bridgeLoading) {
-        bridgeLoading = true;
-        showStatus('Connecting to Google check-in service…');
+  if (!bridgeLoading) {
+    bridgeLoading = true;
+    showStatus('Connecting to Google check-in service…');
+    bridgeFrame.src = APP_SCRIPT_URL + '?mode=bridge';
+  }
 
-        bridgeFrame.src = APP_SCRIPT_URL + '?mode=bridge';
+  if (bridgeFrame.contentWindow) {
+    bridgeFrame.contentWindow.postMessage(
+      { type: 'BRIDGE_PING' },
+      '*'
+    );
+  }
 
-        clearTimeout(connectionTimer);
-
-        connectionTimer = setTimeout(function() {
-          if (!bridgeReady) {
-            bridgeLoading = false;
-            showStatus(
-              'Google connection timed out. Check the Apps Script deployment and Bridge.html.',
-              'error'
-            );
-          }
-        }, 20000);
-      }
-
-      return false;
-    }
+  return false;
+}
 
     window.addEventListener('message', function(event) {
       // Only accept messages from our own embedded connection frame.
@@ -193,19 +188,13 @@
 
       if (!data || typeof data !== 'object') return;
 
-      if (data.type === 'BRIDGE_READY') {
-        clearTimeout(connectionTimer);
-        bridgeReady = true;
-        bridgeLoading = false;
-
-        showStatus(
-          scanning
-            ? 'Google connection ready. Point the camera at a ticket.'
-            : 'Google connection ready. Start the camera when ready.'
-        );
-
-        return;
-      }
+      
+if (data.type === 'BRIDGE_READY') {
+  bridgeReady = true;
+  bridgeLoading = false;
+  showStatus('Google connected. Ready to scan.');
+  return;
+}
 
       if (data.type !== 'CHECKIN_RESULT') return;
       if (data.ticketID !== pendingTicketID) return;
