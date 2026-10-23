@@ -182,7 +182,12 @@
       // Only accept messages from our own embedded connection frame.
       if (event.source !== bridgeFrame.contentWindow) return;
 
-      if (!GOOGLE_ORIGINS.includes(event.origin)) return;
+      const isGoogleOrigin =
+          event.origin === 'https://script.google.com' ||
+          event.origin === 'https://script.googleusercontent.com' ||
+          event.origin.endsWith('.script.googleusercontent.com');
+
+      if (!isGoogleOrigin) return;
 
       const data = event.data;
 
