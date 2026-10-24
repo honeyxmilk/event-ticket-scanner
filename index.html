@@ -3,354 +3,422 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EVA Dance Live Check-In</title>
-  <script src="https://unpkg.com/html5-qrcode"></script>
-  <style>
-    * { box-sizing: border-box; }
+  <title>EVA Dance Company — Ticket Scanner</title>
 
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 520px;
-      margin: auto;
-      padding: 18px;
-      background: #f4f5f7;
-      color: #202124;
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
     }
 
-    .card {
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #f5f3f7;
+      color: #28232c;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      margin-bottom: 8px;
+      font-size: 27px;
+    }
+
+    .subtitle {
+      color: #6e6875;
+      font-size: 14px;
+    }
+
+    .panel {
       background: white;
       border-radius: 16px;
       padding: 20px;
-      box-shadow: 0 2px 12px #0001;
+      box-shadow: 0 3px 15px #20102a12;
+      margin-bottom: 16px;
     }
 
-    h1 { margin-top: 0; font-size: 25px; }
-    p { line-height: 1.45; }
+    #connectionStatus {
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 12px;
+      border-radius: 9px;
+      background: #fff4d9;
+      color: #76500a;
+      margin-bottom: 16px;
+      overflow-wrap: anywhere;
+    }
+
+    #reader {
+      width: 100%;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+
+    #reader video {
+      border-radius: 10px;
+    }
 
     button {
       width: 100%;
-      padding: 14px;
-      margin: 8px 0;
+      padding: 15px;
+      margin-top: 12px;
       border: 0;
       border-radius: 10px;
-      background: #202124;
-      color: white;
       font-size: 16px;
       font-weight: bold;
+      cursor: pointer;
+      background: #59366f;
+      color: white;
     }
 
-    button:disabled { opacity: .55; }
-    #reader { width: 100%; margin-top: 12px; }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
 
-    #status {
-      padding: 15px;
+    #result {
+      display: none;
+      margin-top: 16px;
+      padding: 16px;
       border-radius: 10px;
-      background: #eee;
-      white-space: pre-line;
-      overflow-wrap: anywhere;
-      font-weight: bold;
       line-height: 1.5;
+      overflow-wrap: anywhere;
     }
 
-    .success { background: #d9f8e3 !important; color: #126333; }
-    .warning { background: #fff0c2 !important; color: #754b00; }
-    .error { background: #ffe0e0 !important; color: #991b1b; }
-    .muted { color: #666; font-size: 13px; font-weight: normal; }
+    #result.success {
+      display: block;
+      background: #e5f6e9;
+      color: #175b2a;
+    }
 
+    #result.warning {
+      display: block;
+      background: #fff1d6;
+      color: #754b00;
+    }
+
+    #result.error {
+      display: block;
+      background: #fde8e8;
+      color: #8c2020;
+    }
+
+    .hint {
+      color: #77717e;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 0;
+    }
+
+    /* The Google Apps Script bridge stays loaded but invisible. */
     #googleConnection {
-      position: absolute;
+      position: fixed;
+      left: -10px;
+      bottom: 0;
       width: 1px;
       height: 1px;
-      left: -9999px;
-      top: 0;
+      opacity: 0.01;
       border: 0;
+      pointer-events: none;
     }
   </style>
 </head>
 
 <body>
-  <main class="card">
-    <h1>EVA Dance Check-In</h1>
+  <main class="container">
+    <header>
+      <h1>EVA Dance Company</h1>
+      <div class="subtitle">Event ticket check-in scanner</div>
+    </header>
 
-    <p class="muted">
-      Scan a ticket QR code. Valid tickets are checked in automatically.
-    </p>
+    <section class="panel">
+      <div id="connectionStatus" role="status" aria-live="polite">
+        Connecting to Google check-in service…
+      </div>
 
-    <button id="startButton" onclick="startScanner()">
-      Open Live Scanner
-    </button>
+      <div id="reader"></div>
 
-    <button id="stopButton" onclick="stopScanner()" disabled>
-      Stop Camera
-    </button>
+      <button id="startButton" type="button">
+        Open Live Scanner
+      </button>
 
-    <div id="reader"></div>
+      <div id="result" role="status" aria-live="polite"></div>
 
-    <h3>Latest result</h3>
-
-    <div id="status" role="status" aria-live="polite">
-      Ready. Open the scanner to connect to Google Sheets.
-    </div>
-
-    <p class="muted">
-      Keep this page open during check-in. Allow camera access when prompted.
-    </p>
-
-    <!-- Hidden Apps Script connection frame -->
-    <iframe
-      id="googleConnection"
-      title="Google check-in connection"
-      aria-hidden="true">
-    </iframe>
+      <p class="hint">
+        Allow camera access when prompted. Scan the QR code on a
+        ticket and wait for the check-in result before scanning
+        the next ticket.
+      </p>
+    </section>
   </main>
 
+  <iframe
+    id="googleConnection"
+    title="Google check-in connection"
+    aria-hidden="true">
+  </iframe>
+
   <script>
+    'use strict';
+
+    // ----------------------------------------------------
+    // CONFIGURATION
+    // ----------------------------------------------------
+
     const APP_SCRIPT_URL =
       'https://script.google.com/macros/s/AKfycbyPOpu0qWl0trE2A1xLCKlMBtMIWiOwX-sn9MAA6RJMQ1MnnFFaOqC9AgGUYCqA32RA/exec';
 
     const GITHUB_ORIGIN = 'https://honeyxmilk.github.io';
-    const GOOGLE_ORIGINS = [
-      'https://script.google.com',
-      'https://script.googleusercontent.com'
-    ];
+
+    const BRIDGE_URL = APP_SCRIPT_URL + '?mode=bridge';
+
+    // ----------------------------------------------------
+    // ELEMENTS AND STATE
+    // ----------------------------------------------------
 
     const bridgeFrame = document.getElementById('googleConnection');
-    const statusBox = document.getElementById('status');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const resultBox = document.getElementById('result');
     const startButton = document.getElementById('startButton');
-    const stopButton = document.getElementById('stopButton');
 
     let scanner = null;
+    let cameraRunning = false;
     let bridgeReady = false;
-    let bridgeLoading = false;
-    let scanning = false;
-    let processing = false;
-    let pendingTicketID = '';
-    let connectionTimer = null;
-    let resultTimer = null;
-    let requestTimer = null;
+    let bridgeStarted = false;
+    let processingTicket = false;
+    let pendingTicketID = null;
+    let connectionInterval = null;
+    let resultTimeout = null;
 
-    function showStatus(message, kind = '') {
-      statusBox.className = kind;
-      statusBox.textContent = message;
+    // ----------------------------------------------------
+    // STATUS DISPLAY
+    // ----------------------------------------------------
+
+    function setConnectionStatus(message, connected) {
+      connectionStatus.textContent = message;
+
+      if (connected) {
+        connectionStatus.style.background = '#e5f6e9';
+        connectionStatus.style.color = '#175b2a';
+      } else {
+        connectionStatus.style.background = '#fff4d9';
+        connectionStatus.style.color = '#76500a';
+      }
     }
 
-    function extractTicketID(rawText) {
-      const text = String(rawText || '').trim();
+    function showResult(message, type) {
+      resultBox.className = type;
+      resultBox.textContent = message;
+      resultBox.style.display = 'block';
 
-      try {
-        const url = new URL(text);
-        const id = url.searchParams.get('ticket');
-
-        if (id && /^[A-Za-z0-9_-]+$/.test(id)) {
-          return id;
-        }
-      } catch (e) {}
-
-      if (/^[A-Za-z0-9_-]+$/.test(text)) {
-        return text;
+      if (resultTimeout) {
+        clearTimeout(resultTimeout);
       }
 
-      return '';
+      resultTimeout = setTimeout(function () {
+        resultBox.style.display = 'none';
+        resultBox.className = '';
+      }, 5000);
     }
 
-    
-function connectToGoogle() {
-  if (bridgeReady) return true;
+    // ----------------------------------------------------
+    // GOOGLE BRIDGE CONNECTION
+    // ----------------------------------------------------
 
-  if (!bridgeLoading) {
-    bridgeLoading = true;
-    showStatus('Connecting to Google check-in service…');
-    bridgeFrame.src = APP_SCRIPT_URL + '?mode=bridge';
-  }
+    function isGoogleOrigin(origin) {
+      return origin === 'https://script.google.com' ||
+        origin === 'https://script.googleusercontent.com' ||
+        (
+          origin.startsWith('https://') &&
+          origin.endsWith('.script.googleusercontent.com')
+        );
+    }
 
-  if (bridgeFrame.contentWindow) {
-    bridgeFrame.contentWindow.postMessage(
-      { type: 'BRIDGE_PING' },
-      '*'
-    );
-  }
+    function pingGoogleBridge() {
+      if (bridgeReady || !bridgeStarted) {
+        return;
+      }
 
-  return false;
-}
+      try {
+        bridgeFrame.contentWindow.postMessage(
+          { type: 'BRIDGE_PING' },
+          '*'
+        );
+      } catch (error) {
+        console.warn('Bridge ping failed:', error);
+      }
+    }
 
-    window.addEventListener('message', function(event) {
-      // Only accept messages from our own embedded connection frame.
-      if (event.source !== bridgeFrame.contentWindow) return;
+    function connectToGoogle() {
+      if (bridgeStarted) {
+        pingGoogleBridge();
+        return;
+      }
 
-      const isGoogleOrigin =
-          event.origin === 'https://script.google.com' ||
-          event.origin === 'https://script.googleusercontent.com' ||
-          event.origin.endsWith('.script.googleusercontent.com');
+      bridgeStarted = true;
+      setConnectionStatus(
+        'Loading Google check-in service…',
+        false
+      );
 
-      if (!isGoogleOrigin) return;
+      // The load listener below is registered before this URL
+      // is assigned, so the first connection ping is not lost.
+      bridgeFrame.src = BRIDGE_URL;
+
+      // Retry pings until the bridge confirms it is ready.
+      // This also handles slow mobile connections.
+      connectionInterval = setInterval(function () {
+        if (bridgeReady) {
+          clearInterval(connectionInterval);
+          connectionInterval = null;
+          return;
+        }
+
+        pingGoogleBridge();
+      }, 1500);
+    }
+
+    // IMPORTANT: send a ping after the iframe finishes loading.
+    bridgeFrame.addEventListener('load', function () {
+      pingGoogleBridge();
+    });
+
+    // ----------------------------------------------------
+    // MESSAGES FROM GOOGLE APPS SCRIPT
+    // ----------------------------------------------------
+
+    window.addEventListener('message', function (event) {
+      if (event.source !== bridgeFrame.contentWindow) {
+        return;
+      }
+
+      if (!isGoogleOrigin(event.origin)) {
+        return;
+      }
 
       const data = event.data;
 
-      if (!data || typeof data !== 'object') return;
-
-      
-if (data.type === 'BRIDGE_READY') {
-  bridgeReady = true;
-  bridgeLoading = false;
-  showStatus('Google connected. Ready to scan.');
-  return;
-}
-
-      if (data.type !== 'CHECKIN_RESULT') return;
-      if (data.ticketID !== pendingTicketID) return;
-
-      clearTimeout(requestTimer);
-
-      const ticketID = pendingTicketID;
-      const result = data.result;
-
-      pendingTicketID = '';
-
-      if (result === 'success') {
-        showStatus(
-          '✓ CHECKED IN SUCCESSFULLY\nTicket ID: ' + ticketID,
-          'success'
-        );
-      } else if (result === 'already') {
-        showStatus(
-          '⚠ ALREADY SCANNED\nThis ticket has already been checked in.\nTicket ID: ' + ticketID,
-          'warning'
-        );
-      } else if (result === 'invalid') {
-        showStatus(
-          '✕ INVALID TICKET\nThis ticket is not valid.\nTicket ID: ' + ticketID,
-          'error'
-        );
-      } else if (result === 'not_found') {
-        showStatus(
-          '✕ TICKET NOT FOUND\nTicket ID: ' + ticketID,
-          'error'
-        );
-      } else if (result === 'busy') {
-        showStatus(
-          'Another check-in is being processed. Please try again.',
-          'warning'
-        );
-      } else {
-        showStatus(
-          'Check-in could not be confirmed. Verify the ticket in Google Sheets before retrying.',
-          'error'
-        );
-      }
-
-      clearTimeout(resultTimer);
-
-      resultTimer = setTimeout(function() {
-        processing = false;
-
-        if (scanner && scanning) {
-          try {
-            scanner.resume();
-          } catch (e) {}
-
-          if (bridgeReady) {
-            statusBox.setAttribute('data-camera-ready', 'true');
-          }
-        }
-      }, 1800);
-    });
-
-    async function startScanner() {
-      if (scanning) return;
-
-      startButton.disabled = true;
-
-      if (!bridgeReady) {
-        connectToGoogle();
-      }
-
-      if (typeof Html5Qrcode === 'undefined') {
-        startButton.disabled = false;
-        showStatus(
-          'Scanner library failed to load. Check your internet connection and reload.',
-          'error'
-        );
+      if (!data || typeof data !== 'object') {
         return;
       }
 
-      try {
-        scanner = new Html5Qrcode('reader');
+      if (data.type === 'BRIDGE_READY') {
+        bridgeReady = true;
 
-        await scanner.start(
-          { facingMode: 'environment' },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1
-          },
-          handleScan,
-          function() {}
+        if (connectionInterval) {
+          clearInterval(connectionInterval);
+          connectionInterval = null;
+        }
+
+        setConnectionStatus(
+          'Google connected. Ready to scan.',
+          true
         );
 
-        scanning = true;
-        stopButton.disabled = false;
-
-        showStatus(
-          bridgeReady
-            ? 'Camera active. Ready to scan a ticket.'
-            : 'Camera active. Connecting to Google…'
-        );
-      } catch (error) {
-        scanning = false;
-        startButton.disabled = false;
-        stopButton.disabled = true;
-
-        showStatus(
-          'Could not start the camera: ' +
-          (error && error.name ? error.name : 'Unknown error') +
-          '. Check Chrome site permissions and Android Camera access.',
-          'error'
-        );
+        return;
       }
+
+      if (data.type !== 'CHECKIN_RESULT') {
+        return;
+      }
+
+      // Ignore a response that does not match the pending scan.
+      if (
+        !processingTicket ||
+        String(data.ticketID || '') !== pendingTicketID
+      ) {
+        return;
+      }
+
+      processingTicket = false;
+      pendingTicketID = null;
+
+      handleCheckInResult(data);
+    });
+
+    // ----------------------------------------------------
+    // QR CODE READING
+    // ----------------------------------------------------
+
+    function extractTicketID(decodedText) {
+      const raw = String(decodedText || '').trim();
+
+      // QR codes generated by the ticket system contain:
+      // Apps Script URL + "?ticket=TICKET_ID"
+      try {
+        const url = new URL(raw);
+        const ticket = url.searchParams.get('ticket');
+
+        if (ticket) {
+          return ticket.trim();
+        }
+      } catch (error) {
+        // The QR content may be a plain ticket ID instead.
+      }
+
+      return raw;
     }
 
-    async function handleScan(decodedText) {
-      if (processing || !scanning) return;
+    function isValidTicketID(ticketID) {
+      // Supports IDs such as ESF26-0001.
+      return /^[A-Za-z0-9_-]{1,100}$/.test(ticketID);
+    }
+
+    async function onScanSuccess(decodedText) {
+      if (processingTicket) {
+        return;
+      }
 
       const ticketID = extractTicketID(decodedText);
 
-      processing = true;
-
-      try {
-        scanner.pause(true);
-      } catch (e) {}
-
-      if (!ticketID) {
-        showStatus(
-          'QR code detected, but it is not a recognized ticket QR.',
+      if (!isValidTicketID(ticketID)) {
+        showResult(
+          'This QR code does not look like a valid ticket.',
           'error'
         );
-
-        setTimeout(resumeAfterInvalid, 1600);
         return;
       }
 
+      // Stop duplicate callbacks while this ticket is processed.
+      processingTicket = true;
+      pendingTicketID = ticketID;
+
+      try {
+        if (scanner && cameraRunning) {
+          scanner.pause(true);
+        }
+      } catch (error) {
+        console.warn('Could not pause camera:', error);
+      }
+
       if (!bridgeReady) {
-        showStatus(
-          'Google connection is not ready. Reconnecting…',
+        processingTicket = false;
+        pendingTicketID = null;
+
+        showResult(
+          'Google is not connected yet. Please wait for the connection message and scan again.',
           'warning'
         );
 
         connectToGoogle();
-        setTimeout(resumeAfterInvalid, 2000);
+        resumeCameraSoon(1200);
         return;
       }
 
-      pendingTicketID = ticketID;
-
-      showStatus('Checking in ticket…\nTicket ID: ' + ticketID);
+      showResult('Checking ticket ' + ticketID + '…', 'warning');
 
       try {
-        /*
-         * The embedded Apps Script page can redirect to a Google-hosted
-         * origin, so "*" is used as the target. The receiver validates
-         * the sender's origin and the parent window before acting.
-         */
         bridgeFrame.contentWindow.postMessage(
           {
             type: 'CHECKIN_REQUEST',
@@ -358,68 +426,181 @@ if (data.type === 'BRIDGE_READY') {
           },
           '*'
         );
-
-        clearTimeout(requestTimer);
-
-        requestTimer = setTimeout(function() {
-          if (pendingTicketID === ticketID) {
-            pendingTicketID = '';
-            processing = false;
-
-            showStatus(
-              'No response from Google. Check the Apps Script deployment and verify the ticket status before retrying.',
-              'error'
-            );
-
-            try {
-              if (scanner && scanning) scanner.resume();
-            } catch (e) {}
-          }
-        }, 15000);
-
       } catch (error) {
-        clearTimeout(requestTimer);
-        pendingTicketID = '';
+        processingTicket = false;
+        pendingTicketID = null;
 
-        showStatus(
-          'Could not send ticket to Google. Please retry.',
+        showResult(
+          'Could not send the check-in request. Please try again.',
           'error'
         );
 
-        setTimeout(resumeAfterInvalid, 1800);
+        resumeCameraSoon(1200);
       }
+
+      // Avoid leaving the camera paused forever if Google never
+      // responds. A late response will be ignored after timeout.
+      setTimeout(function () {
+        if (
+          processingTicket &&
+          pendingTicketID === ticketID
+        ) {
+          processingTicket = false;
+          pendingTicketID = null;
+
+          showResult(
+            'Google did not respond in time. Please check the connection and scan again.',
+            'error'
+          );
+
+          connectToGoogle();
+          resumeCameraSoon(1200);
+        }
+      }, 12000);
     }
 
-    function resumeAfterInvalid() {
-      processing = false;
+    function handleCheckInResult(data) {
+      const result = String(data.result || '');
 
-      if (scanner && scanning) {
+      switch (result) {
+        case 'success':
+          showResult(
+            '✓ CHECK-IN SUCCESSFUL\nTicket: ' +
+              data.ticketID +
+              '\nName: ' + (data.name || 'Ticket accepted'),
+            'success'
+          );
+          break;
+
+        case 'already':
+          showResult(
+            '⚠ THIS TICKET HAS ALREADY BEEN CHECKED IN\nTicket: ' +
+              data.ticketID,
+            'warning'
+          );
+          break;
+
+        case 'invalid':
+          showResult(
+            '✕ INVALID OR UNUSABLE TICKET\nTicket: ' +
+              data.ticketID,
+            'error'
+          );
+          break;
+
+        case 'not_found':
+          showResult(
+            '✕ TICKET NOT FOUND\nPlease check that this ticket belongs to this event.',
+            'error'
+          );
+          break;
+
+        case 'busy':
+          showResult(
+            'The check-in system is busy. Please scan again.',
+            'warning'
+          );
+          break;
+
+        default:
+          showResult(
+            'Could not verify this ticket. Please try again.' +
+              (data.message ? '\n' + data.message : ''),
+            'error'
+          );
+          break;
+      }
+
+      resumeCameraSoon(1800);
+    }
+
+    function resumeCameraSoon(delay) {
+      setTimeout(function () {
+        if (!scanner || !cameraRunning || processingTicket) {
+          return;
+        }
+
         try {
           scanner.resume();
-        } catch (e) {}
+        } catch (error) {
+          console.warn('Could not resume camera:', error);
+        }
+      }, delay);
+    }
+
+    function onScanFailure() {
+      // QR library calls this frequently when no QR is visible.
+      // Do not show errors for ordinary missed frames.
+    }
+
+    // ----------------------------------------------------
+    // CAMERA CONTROLS
+    // ----------------------------------------------------
+
+    async function startScanner() {
+      if (cameraRunning) {
+        return;
+      }
+
+      if (typeof Html5Qrcode === 'undefined') {
+        showResult(
+          'The scanner library did not load. Check your internet connection and reload this page.',
+          'error'
+        );
+        return;
+      }
+
+      startButton.disabled = true;
+      startButton.textContent = 'Starting camera…';
+
+      try {
+        if (!scanner) {
+          scanner = new Html5Qrcode('reader');
+        }
+
+        await scanner.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: function (viewfinderWidth, viewfinderHeight) {
+              const size = Math.floor(
+                Math.min(viewfinderWidth, viewfinderHeight) * 0.72
+              );
+
+              return { width: size, height: size };
+            },
+            aspectRatio: 1.0
+          },
+          onScanSuccess,
+          onScanFailure
+        );
+
+        cameraRunning = true;
+        startButton.textContent = 'Camera Active';
+        startButton.disabled = true;
+
+        // Keep camera startup independent from Google startup.
+        connectToGoogle();
+
+      } catch (error) {
+        cameraRunning = false;
+        startButton.disabled = false;
+        startButton.textContent = 'Try Camera Again';
+
+        showResult(
+          'Could not start the camera. Allow camera permission and open this page using HTTPS.',
+          'error'
+        );
+
+        console.error('Camera startup failed:', error);
       }
     }
 
-    async function stopScanner() {
-      scanning = false;
-      processing = false;
-      pendingTicketID = '';
+    startButton.addEventListener('click', startScanner);
 
-      clearTimeout(requestTimer);
-      clearTimeout(resultTimer);
-
-      try {
-        if (scanner) {
-          await scanner.stop();
-          scanner.clear();
-        }
-      } catch (e) {}
-
-      startButton.disabled = false;
-      stopButton.disabled = true;
-
-      showStatus('Camera stopped.');
-    }
+    // Start the Google connection as soon as the page opens.
+    // The camera still starts only after the user taps the button.
+    connectToGoogle();
   </script>
 </body>
 </html>
