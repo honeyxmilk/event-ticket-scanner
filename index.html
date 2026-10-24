@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>EVA Dance Company — Live Scanner</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
-
   <style>
     * { box-sizing: border-box; }
 
@@ -67,9 +66,7 @@
       cursor: pointer;
     }
 
-    button.stop {
-      background: #5c5960;
-    }
+    button.stop { background: #5c5960; }
 
     button:disabled {
       opacity: 0.55;
@@ -81,7 +78,7 @@
       position: fixed;
       z-index: 10;
       left: 5%;
-      top: 35%;
+      top: 30%;
       width: 90%;
       max-width: 460px;
       padding: 24px 18px;
@@ -129,7 +126,7 @@
 
     <section class="panel">
       <div id="status" role="status" aria-live="polite">
-        Ready to start. Open this page from the staff check-in page.
+        Ready to start. Tap Ready to Scan to begin.
       </div>
 
       <div id="reader"></div>
@@ -143,8 +140,8 @@
       </button>
 
       <p class="hint">
-        Keep this page open during check-in. After each scan, the
-        result appears here and the camera resumes automatically.
+        Keep this page open during check-in. Results appear here,
+        and the camera resumes automatically after each result.
       </p>
     </section>
   </main>
@@ -154,7 +151,9 @@
   <script>
     'use strict';
 
-    const STAFF_ORIGIN = 'https://honeyxmilk.github.io';
+    // Your deployed Apps Script web app URL.
+    const APPS_SCRIPT_URL =
+      'https://script.google.com/macros/s/AKfycbyPOpu0qWl0trE2A1xLCKlMBtMIWiOwX-sn9MAA6RJMQ1MnnFFaOqC9AgGUYCqA32RA/exec';
 
     const statusBox = document.getElementById('status');
     const messageBox = document.getElementById('message');
@@ -167,6 +166,7 @@
     let pendingTicketID = null;
     let messageTimer = null;
     let scanTimeout = null;
+    let responseScript = null;
 
     function setStatus(text) {
       statusBox.textContent = text;
@@ -181,7 +181,7 @@
       messageTimer = setTimeout(function() {
         messageBox.style.display = 'none';
         messageBox.className = '';
-      }, 2200);
+      }, 2600);
     }
 
     function hideMessage() {
@@ -196,6 +196,7 @@
       try {
         const url = new URL(raw);
         const ticket = url.searchParams.get('ticket');
+
         if (ticket) return ticket.trim();
       } catch (error) {
         // QR content may be a plain ticket ID.
@@ -208,111 +209,38 @@
       return /^[A-Za-z0-9_-]{1,100}$/.test(id);
     }
 
-    function onScanSuccess(decodedText) {
-      if (processing || !cameraRunning) return;
-
-      const ticketID = extractTicketID(decodedText);
-
-      if (!isValidTicketID(ticketID)) {
-        showMessage('Unrecognized ticket QR code', 'error');
-        return;
+    function removeResponseScript() {
+      if (responseScript) {
+        responseScript.remove();
+        responseScript = null;
       }
+    }
 
-      if (!window.opener || window.opener.closed) {
-        showMessage(
-          'Staff page is no longer connected. Close this page and reopen the scanner from the staff page.',
-          'error'
-        );
-        setStatus('Staff page connection lost.');
-        return;
-      }
-
-      processing = true;
-      pendingTicketID = ticketID;
-
-      try {
-        scanner.pause(true);
-      } catch (error) {}
-
-      setStatus('Checking ticket ' + ticketID + '…');
-
-      // Send the ticket ID to the staff Apps Script page.
-      window.opener.postMessage({
-        type: 'TICKET_SCANNED',
-        ticketID: ticketID
-      }, '*');
-
+    function finishRequest() {
       clearTimeout(scanTimeout);
-
-      scanTimeout = setTimeout(function() {
-        if (processing && pendingTicketID === ticketID) {
-          processing = false;
-          pendingTicketID = null;
-
-          showMessage(
-            'No response from the staff page. Please try scanning again.',
-            'error'
-          );
-
-          setStatus('Waiting for the next scan.');
-          resumeCamera();
-        }
-      }, 15000);
-    }
-
-    function resumeCamera() {
-      if (!scanner || !cameraRunning) return;
-
-      setTimeout(function() {
-        if (!cameraRunning || processing) return;
-
-        try {
-          scanner.resume();
-          setStatus('Camera active. Ready for the next ticket.');
-        } catch (error) {
-          setStatus('Unable to resume camera. Please stop and restart it.');
-        }
-      }, 900);
-    }
-
-    function isGoogleOrigin(origin) {
-      return origin === 'https://script.google.com' ||
-        origin === 'https://script.googleusercontent.com' ||
-        (
-          origin.startsWith('https://') &&
-          origin.endsWith('.script.googleusercontent.com')
-        );
-    }
-
-    // Receive the check-in result from the Apps Script staff page.
-    window.addEventListener('message', function(event) {
-      if (event.source !== window.opener) return;
-      if (!isGoogleOrigin(event.origin)) return;
-
-      const data = event.data;
-
-      if (!data || data.type !== 'CHECKIN_RESULT') return;
-
-      if (
-        !processing ||
-        String(data.ticketID || '') !== pendingTicketID
-      ) {
-        return;
-      }
-
-      clearTimeout(scanTimeout);
-
-      const ticketID = pendingTicketID;
+      removeResponseScript();
       processing = false;
       pendingTicketID = null;
+    }
 
-      switch (String(data.result || '')) {
+    // Apps Script JSONP calls this global callback with the result.
+    window.handleCheckinResponse = function(data) {
+      if (!processing || !pendingTicketID) return;
+
+      const ticketID = pendingTicketID;
+      finishRequest();
+
+      const result = data && data.result;
+
+      switch (result) {
         case 'success':
           showMessage(
             '✓ SUCCESSFULLY CHECKED IN\n' + ticketID,
             'success'
           );
-          setStatus('Check-in successful. Ready for the next ticket.');
+          setStatus(
+            'Check-in successful. Ready for the next ticket.'
+          );
           break;
 
         case 'already':
@@ -339,38 +267,106 @@
           setStatus('No matching ticket was found.');
           break;
 
-        case 'busy':
-          showMessage(
-            'Please try scanning this ticket again.',
-            'warning'
-          );
-          setStatus('Check-in system is busy.');
-          break;
-
         default:
           showMessage(
-            'Could not verify ticket.\n' +
-              (data.message || 'Please try again.'),
-            'error'
+            'CHECK-IN NOT CONFIRMED\n' +
+            ticketID +
+            '\nVerify the ticket status before admitting the guest.',
+            'warning'
           );
-          setStatus('Check-in failed. Ready to retry.');
+          setStatus('Could not confirm check-in.');
           break;
       }
 
-      // Keep the camera running and resume after the result.
       resumeCamera();
-    });
+    };
+
+    function onScanSuccess(decodedText) {
+      if (processing || !cameraRunning) return;
+
+      const ticketID = extractTicketID(decodedText);
+
+      if (!isValidTicketID(ticketID)) {
+        showMessage('Unrecognized ticket QR code', 'error');
+        return;
+      }
+
+      processing = true;
+      pendingTicketID = ticketID;
+
+      try {
+        scanner.pause(true);
+      } catch (error) {}
+
+      setStatus('Checking ticket ' + ticketID + '…');
+      hideMessage();
+
+      const url = new URL(APPS_SCRIPT_URL);
+      url.searchParams.set('api', 'checkin');
+      url.searchParams.set('ticketID', ticketID);
+      url.searchParams.set('callback', 'handleCheckinResponse');
+      url.searchParams.set('_', String(Date.now()));
+
+      responseScript = document.createElement('script');
+      responseScript.src = url.toString();
+      responseScript.async = true;
+
+      responseScript.onerror = function() {
+        if (!processing || pendingTicketID !== ticketID) return;
+
+        finishRequest();
+
+        showMessage(
+          'CONNECTION PROBLEM\n' +
+          ticketID +
+          '\nThe result is unconfirmed. Verify the ticket status before admitting the guest.',
+          'warning'
+        );
+
+        setStatus('No response received. Ready to verify again.');
+        resumeCamera();
+      };
+
+      document.head.appendChild(responseScript);
+
+      // A timeout means the result is unconfirmed,
+      // not that the check-in definitely failed.
+      scanTimeout = setTimeout(function() {
+        if (!processing || pendingTicketID !== ticketID) return;
+
+        finishRequest();
+
+        showMessage(
+          'CHECK-IN NOT CONFIRMED\n' +
+          ticketID +
+          '\nVerify the ticket status before admitting the guest.',
+          'warning'
+        );
+
+        setStatus('Request timed out. Ready to verify again.');
+        resumeCamera();
+      }, 20000);
+    }
+
+    function resumeCamera() {
+      if (!scanner || !cameraRunning) return;
+
+      setTimeout(function() {
+        if (!cameraRunning || processing) return;
+
+        try {
+          scanner.resume();
+          setStatus('Camera active. Ready for the next ticket.');
+        } catch (error) {
+          setStatus(
+            'Unable to resume camera. Please stop and restart it.'
+          );
+        }
+      }, 700);
+    }
 
     async function startScanner() {
       if (cameraRunning) return;
-
-      if (!window.opener || window.opener.closed) {
-        showMessage(
-          'Please open this scanner from the staff check-in page.',
-          'error'
-        );
-        return;
-      }
 
       if (typeof Html5Qrcode === 'undefined') {
         showMessage(
@@ -392,12 +388,18 @@
           { facingMode: 'environment' },
           {
             fps: 10,
+
             qrbox: function(width, height) {
               const size = Math.floor(
                 Math.min(width, height) * 0.72
               );
-              return { width: size, height: size };
+
+              return {
+                width: size,
+                height: size
+              };
             },
+
             aspectRatio: 1
           },
           onScanSuccess,
@@ -411,9 +413,9 @@
         stopButton.hidden = false;
 
         setStatus('Camera active. Ready to scan a ticket.');
-
       } catch (error) {
         console.error(error);
+
         startButton.disabled = false;
         startButton.textContent = 'Try Camera Again';
 
@@ -426,10 +428,11 @@
 
     async function stopScanner() {
       cameraRunning = false;
-      processing = false;
-      pendingTicketID = null;
 
-      clearTimeout(scanTimeout);
+      if (processing) {
+        finishRequest();
+      }
+
       hideMessage();
 
       if (scanner) {
@@ -452,6 +455,9 @@
     stopButton.addEventListener('click', stopScanner);
 
     window.addEventListener('beforeunload', function() {
+      clearTimeout(scanTimeout);
+      clearTimeout(messageTimer);
+
       if (scanner && cameraRunning) {
         scanner.stop().catch(function() {});
       }
